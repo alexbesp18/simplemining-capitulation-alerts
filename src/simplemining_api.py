@@ -6,13 +6,25 @@ All endpoints are public (no auth). Full trade history in one call.
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .config import BASE_URL, TARGET_MODELS, RANGE_WINDOW_DAYS
 from .models import MinerListing, TradeHistory
 
+# Retry on transient HTTP errors (5xx, timeouts, connection errors)
+_RETRY_DECORATOR = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type((requests.exceptions.ConnectionError,
+                                   requests.exceptions.Timeout,
+                                   requests.exceptions.HTTPError)),
+    reraise=True,
+)
 
+
+@_RETRY_DECORATOR
 def _get(path: str, params: Optional[dict] = None) -> dict:
-    """GET request helper. Validates success field, returns data."""
+    """GET request helper with retry. Validates success field, returns data."""
     resp = requests.get(f"{BASE_URL}{path}", params=params, timeout=30)
     resp.raise_for_status()
     body = resp.json()
@@ -126,6 +138,7 @@ def fetch_trade_histories() -> Dict[int, TradeHistory]:
     return results
 
 
+@_RETRY_DECORATOR
 def fetch_current_listings() -> List[MinerListing]:
     """
     GET /v1/marketplace/listings?size=1000&model=85&model=86...
