@@ -22,9 +22,10 @@ def _get(path: str, params: Optional[dict] = None) -> dict:
 
 
 def fetch_hashprice() -> float:
-    """GET /v1/common/hash-price — returns $/PH/day as float."""
+    """GET /v1/common/hash-price — API returns $/TH/day, we convert to $/PH/day."""
     data = _get("/common/hash-price")
-    return float(data)
+    per_th_day = float(data)
+    return round(per_th_day * 1000, 2)  # $/TH/day -> $/PH/day
 
 
 def fetch_marketplace_stats() -> dict:

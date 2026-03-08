@@ -33,7 +33,7 @@ def save_sent_alerts(sent_ids: set):
 
 def _discount_pct(price: float, benchmark: Optional[float]) -> Optional[float]:
     """Compute discount percentage. Returns None if benchmark is missing or invalid."""
-    if not benchmark or benchmark <= 0:
+    if benchmark is None or benchmark <= 0:
         return None
     return round((1 - price / benchmark) * 100, 1)
 
@@ -124,6 +124,59 @@ def find_capitulation_deals(
         ))
 
     return alerts
+
+
+def find_top_deals(
+    listings: List[MinerListing],
+    trade_histories: Dict[int, TradeHistory],
+    hashprice: float,
+    hosting_cost_kwh: float,
+    top_n: int = 5,
+) -> List[Alert]:
+    """
+    Return the top N cheapest listings by $/TH for the daily digest.
+    Applies efficiency quality gate but NO discount threshold and NO sent_alerts dedup.
+    """
+    qualified = []
+
+    for listing in listings:
+        if listing.efficiency_jth > MAX_EFFICIENCY_JTH:
+            continue
+
+        price = listing.listed_price
+        history = trade_histories.get(listing.model_id)
+
+        last_trade = history.last_trade_price if history else None
+        midpoint_90d = history.range_90d_midpoint if history else None
+        ath = history.ath_price if history else None
+
+        disc_last = _discount_pct(price, last_trade)
+        disc_ath = _discount_pct(price, ath)
+        disc_mid = _discount_pct(price, midpoint_90d)
+
+        revenue, hosting, profit = compute_revenue(
+            listing.hashrate_th, listing.power_kw, hashprice, hosting_cost_kwh
+        )
+        months_roi = round(price / profit, 1) if profit > 0 else None
+
+        qualified.append(Alert(
+            listing=listing,
+            hashprice_usd=hashprice,
+            est_monthly_revenue=revenue,
+            est_monthly_hosting_cost=hosting,
+            est_monthly_profit=profit,
+            months_to_roi=months_roi,
+            last_trade_price=last_trade,
+            discount_vs_last_trade=disc_last,
+            ath_price=ath,
+            discount_vs_ath=disc_ath,
+            range_90d_midpoint=midpoint_90d,
+            discount_vs_90d_mid=disc_mid,
+        ))
+
+    # Sort by $/TH ascending (price_per_hashrate)
+    qualified.sort(key=lambda a: a.listing.price_per_hashrate)
+    return qualified[:top_n]
 
 
 def mark_alerts_sent(alerts: List[Alert]):
