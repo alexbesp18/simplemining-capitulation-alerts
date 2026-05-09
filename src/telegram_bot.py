@@ -86,12 +86,24 @@ def send_alert(alert) -> bool:
         return True
 
     msg = format_alert(alert)
-    resp = requests.post(f"{TELEGRAM_API}/sendMessage", json={
-        "chat_id": CHAT_ID,
-        "text": msg,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False,
-    }, timeout=10)
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=2, max=15),
+        retry=retry_if_exception_type((requests.exceptions.ConnectionError,
+                                       requests.exceptions.Timeout)),
+        reraise=True,
+    )
+    def _post():
+        return requests.post(f"{TELEGRAM_API}/sendMessage", json={
+            "chat_id": CHAT_ID,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
+        }, timeout=10)
+
+    resp = _post()
 
     if resp.status_code == 200:
         return True
